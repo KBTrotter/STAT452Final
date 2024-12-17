@@ -1,0 +1,201 @@
+---
+title: "Final Report"
+output: html_document
+date: "2024-12-18"
+---
+
+
+## 1. Data Description
+This data set was collected to study gasoline consumption of cars. There are 30 models of cars included in the data. The response variable is the gasoline consumption measured in miles per gallon each year. 
+
+The predictors include 11 measurements:  
+- X1 Displacement (cubic inches)  
+- X2 Horsepower (feet/pound)  
+- X3 Torque (feet/pound)  
+- X4 Compression ratio  
+- X5 Rear axle ratio  
+- X6 Carburetor (barrels)  
+- X7 Number of transmission speeds  
+- X8 Overall length (inches)  
+- X9 Width (inches)  
+- X10 Weight (pounds)  
+- X11 Type of transmission (1=automatic; 0=manual)  
+
+Data Summary:
+```{r, echo=FALSE}
+data <- read.table("~./STAT452FinalData.txt", header = TRUE)
+summary(data)
+str(data)
+```
+
+## 2. Fit a Linear Regression Model
+```{r, echo=TRUE}
+data <- read.table("~./STAT452FinalData.txt", header = TRUE)
+data$X11 <- factor(data$X11, levels = c(0, 1), labels = c("Manual", "Automatic"))
+Y <- data[,1]
+fit1 <- lm(Y ~ X1 + X2 + X3 + X4 + X5 + X6 + X7 + X8 + X9 + X10 + X11, data = data)
+summary(fit1)
+
+```
+The R-squared value states that 83.5% of the variability in MPG is explained by the predictors. The adjusted R-squared still suggests that the model is a good fit, but the high p-values of the predictors suggest that they are not significant. This means that the model is likely overfitted due to the large number of predictors. 
+The following steps will determine the most significant predictors and seek to improve the model using this knowledge.   
+Note: as predictor X11 is categorical it has been reinterpreted to correctly reflect its importance to the model.
+
+## 3. Choose the best model using stepwise selection method. 
+AIC was chosen as the selection criteria. 
+``` {r, echo= TRUE}
+library(MASS)
+data_frame <- data.frame(Y = data$Y, data[,-1])
+full_model <- lm(Y~., data=data)
+null_model <- lm(Y~1, data = data)
+step_model <- stepAIC(null_model, scope=list(lower = null_model, upper = full_model),  direction = "both")
+
+
+final_model <- step_model
+summary(final_model)
+```
+The final model includes the displacement and compression ratio, X1 and X4 respectively. These are the predictors that are most significant for predicting the MPG. 
+
+
+## 4. Check if there is any outlier. 
+Methods used include Cook's Distance and R-Student residuals to test for influential points.
+``` {r, echo = TRUE}
+library(car)
+
+plot(final_model, which = 4)  # Cook's Distance
+
+qt(1-0.05/(2*30), df.residual(final_model))
+RStudent <- rstudent(final_model)
+outlierTest(final_model) #no outlier detected
+
+```
+The results of the Cook's distance graph show all the distance to be less than 1 which indicates there is not any influential points. The Bonferroni Outlier Test produces results that indicate there are no significant outliers as no points have an adjusted p-value of less than 0.05.
+
+## 5. Tests on assumptions
+
+Start by checking for a linear relationship between the response and regressors. 
+``` {r}
+#Check for a linear relationship between the response and regressors
+qqPlot(final_model)
+plot(fitted(final_model), resid(final_model), 
+     xlab = "Fitted Values", 
+     ylab = "Residuals", 
+     main = "Residuals vs Fitted Values")
+abline(h = 0, col = "red")
+
+```
+
+The qq plot checks for normality and the results of the plot indicate that there could be a positive skew. The plot of residuals vs. fitted values indicates that there could be a funnel pattern to the values. This suggests that the model is linear, but the variance is an increasing function of y. The next test is to check for the constant error variance assumptions which should help prove this conclusion. 
+
+``` {r}
+#Test for constancy of Error Variance
+#Breusch-Pagan test
+ncvTest(final_model)
+```
+Since the p-value is less than 0.05 the test determines that there is a non-constant error variance which will need to be remedied using transformations.   
+The following Durbin-Watson test is used to detect the presence of autocorrelation and randomness.
+```{r}
+#Test to see if errors are uncorrelated
+durbinWatsonTest(final_model, alternative="two.sided")
+```
+Since the p-value of the test is greater than 0.05, the residuals are not correlated.  
+The Shapiro-Wilk test is used to test for normality. Since the p-value is greater than 0.05 the residuals appear to be normal. 
+``` {r}
+#Test to see if errors are normally distributed
+shapiro.test(RStudent)
+```
+
+The last check is to check for multicollinearity using variance inflation factors. If the VIF values are above 10, there are problems with linear dependencies on some of the regressors. 
+``` {r}
+#Test that the regressors are linearly independent
+vif(final_model)
+```
+Since neither regressor has a VIF value greater than 10, there does not appear to be an issue with multicollinearity. 
+
+## 6. Make transformations to fix non-constant variance.
+After performing the above tests the only problem appears to be the non-constant variance in error. A box-cox transformation of y will be used to correct the nonconstant variance. 
+
+``` {r, echo = TRUE}
+
+myboxcox <- boxCox(data$Y ~ data$X1 + data$X4, lambda=seq(-2,2,0.1))
+
+myboxcox$x[which.max(myboxcox$y)]
+```
+The lambda value for the power transformation is found to be -0.222.
+``` {r}
+lambda <- -0.22
+data$Y_transformed <- (data$Y^lambda - 1) / lambda
+
+final_model_transformed <- lm(data$Y_transformed ~ data$X1 + data$X4, data = data)
+summary(final_model_transformed)
+```
+The model summary shows that the Adjusted R-square improved from the original model's 0.76 to 0.78. 
+
+``` {r}
+qqPlot(final_model_transformed)
+
+plot(fitted(final_model_transformed), resid(final_model_transformed), 
+     xlab = "Fitted Values", 
+     ylab = "Residuals", 
+     main = "Residuals vs Fitted Values")
+abline(h = 0, col = "red")
+
+
+#Test for constancy of Error Variance
+#Breusch-Pagan test
+ncvTest(final_model_transformed) #reject null
+
+durbinWatsonTest(final_model_transformed)
+
+shapiro.test(RStudent)
+
+vif(final_model_transformed)
+
+```
+The assumption tests performed on the transformed model show the improvements. The Breusch-Pagan test for constancy of error variance has a p-value greater than 0.05, indicating that the problem has been solved. 
+
+## 7. Final Model and Interpretation
+
+The final model includes two predictors, displacement (X1) and compression ratio (X4), as these were identified as the most significant variables for predicting miles per gallon (MPG) through stepwise selection. After addressing non-constant error variance using a Box-Cox transformation (λ = -0.22), the model shows significant improvements in goodness-of-fit.
+
+### Final Model Equation:
+The final transformed model is given by:
+
+𝑌
+transformed
+=
+1.967
+-0.0011⋅X1 + 0.0614⋅𝑋4
+
+Y 
+transformed
+​
+  represents the Box-Cox transformed MPG.
+
+X1: Displacement (cubic inches).
+X4: Compression ratio.
+
+### Model Evaluation:
+Adjusted R-Squared:
+The adjusted 
+R2
+improved from 0.76 in the original model to 0.78 in the transformed model, indicating that the predictors explain more variability in the response variable after transformation.
+
+### Assumption Tests:
+
+##### Linearity: 
+Residual vs. fitted value plots indicate a linear relationship between Y and the predictors.  
+
+##### Constant Variance: 
+The Breusch-Pagan test for the transformed model shows a p-value > 0.05, confirming that the non-constant variance issue was resolved.
+
+##### Normality of Residuals: 
+The Shapiro-Wilk test confirms normality, with 
+p-value > 0.05.  
+
+##### Independence of Errors: 
+The Durbin-Watson test supports no autocorrelation in the residuals.  
+
+##### Multicollinearity: 
+Variance Inflation Factor (VIF) values are below 10, indicating no multicollinearity concerns.  
+
